@@ -47,9 +47,9 @@ class QwenImageEditPlusTrainer(QwenImageEditTrainer):
 
         # Separate individual components
 
-        self.vae = load_vae("Qwen/Qwen-Image-Edit-2509", weight_dtype=self.weight_dtype)  # use original one
-        # same to model constructed from vae self.vae = pipe.vae
-        self.text_encoder = load_qwenvl("Qwen/Qwen-Image-Edit-2509", weight_dtype=self.weight_dtype)  # use original one
+        model_path = self.config.model.pretrained_model_name_or_path
+        self.vae = load_vae(model_path, weight_dtype=self.weight_dtype)
+        self.text_encoder = load_qwenvl(model_path, weight_dtype=self.weight_dtype)
         logging.info(f"text_encoder device: {self.text_encoder.device}")
         # self.dit = pipe.transformer this is same as the following, verified
 
