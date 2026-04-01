@@ -35,7 +35,10 @@ from tqdm import tqdm
 # Add OminiControl to path for ComponentBankV2
 OMINI_PATH = os.environ.get("OMINI_PATH", "/home/xinrui/projects/OminiControl")
 sys.path.insert(0, OMINI_PATH)
-from lib.component_bank_v2 import ComponentBankV2, get_annotations_in_crop, CAT_ID_TO_NAME
+try:
+    from lib.component_bank_v2 import ComponentBankV2, get_annotations_in_crop, CAT_ID_TO_NAME
+except ModuleNotFoundError:
+    from component_bank_v2 import ComponentBankV2, get_annotations_in_crop, CAT_ID_TO_NAME
 
 
 # ---------------------------------------------------------------------------
