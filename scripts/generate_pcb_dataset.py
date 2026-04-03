@@ -32,13 +32,13 @@ import numpy as np
 from PIL import Image
 from tqdm import tqdm
 
-# Add OminiControl to path for ComponentBankV2
-OMINI_PATH = os.environ.get("OMINI_PATH", "/home/xinrui/projects/OminiControl")
-sys.path.insert(0, OMINI_PATH)
+# Add lib to path for ComponentBankV2_new
+LIB_PATH = os.environ.get("LIB_PATH", os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, LIB_PATH)
 try:
-    from lib.component_bank_v2 import ComponentBankV2, get_annotations_in_crop, CAT_ID_TO_NAME
+    from lib.component_bank_v2_new import ComponentBankV2_new, get_annotations_in_crop, CAT_ID_TO_NAME
 except ModuleNotFoundError:
-    from component_bank_v2 import ComponentBankV2, get_annotations_in_crop, CAT_ID_TO_NAME
+    from component_bank_v2_new import ComponentBankV2_new, get_annotations_in_crop, CAT_ID_TO_NAME
 
 
 # ---------------------------------------------------------------------------
@@ -71,14 +71,33 @@ COLOR_NAMES = {
     "black": "black", "white": "white", "yellow": "yellow",
 }
 
+CAT_SHORT = {
+    "RESISTOR": "R", "CAPACITOR": "C", "INDUCTOR": "L", "CONNECTOR": "J",
+    "DIODE": "D", "LED": "LED", "SWITCH": "SW", "TRANSISTOR": "Q",
+    "IC": "IC", "OSCILLATOR": "Y", "FUSE": "F",
+    "Integrated Circuit": "IC", "Integrated_Circuit": "IC",
+}
 
-def make_prompt(board_color: str) -> str:
+
+def make_prompt(board_color: str, annotations=None, crop_size=512) -> str:
     color = COLOR_NAMES.get(board_color, "green")
     template = random.choice(PROMPT_TEMPLATES)
-    return template.format(color=color)
+    prompt = template.format(color=color)
+    if annotations:
+        layout_parts = []
+        for ann in annotations:
+            cat = CAT_SHORT.get(ann["category_name"], ann["category_name"])
+            x, y, w, h = ann["bbox"]
+            nx = x / crop_size
+            ny = y / crop_size
+            nw = w / crop_size
+            nh = h / crop_size
+            layout_parts.append(f"{cat} ({nx:.2f},{ny:.2f},{nw:.2f},{nh:.2f})")
+        prompt += "\nLayout: " + "; ".join(layout_parts)
+    return prompt
 
 
-def build_composite(annotations, bank, exclude_board, board_color, width, height, resize_jitter=0.15):
+def build_composite(annotations, bank, exclude_board, board_color, resolution_class, width, height, resize_jitter=0.15):
     """Build a composite image by pasting matched components onto white canvas."""
     canvas = Image.new("RGB", (width, height), (255, 255, 255))
     for ann in annotations:
@@ -87,9 +106,11 @@ def build_composite(annotations, bank, exclude_board, board_color, width, height
         rw, rh = int(rw), int(rh)
         if rw < 3 or rh < 3:
             continue
+        orientation = ann.get("orientation", 0)
         match = bank.find_match(
             category=cat_name, target_w=rw, target_h=rh,
-            board_color=board_color, exclude_board=exclude_board,
+            board_color=board_color, resolution_class=resolution_class,
+            orientation=orientation, exclude_board=exclude_board,
         )
         if match is None:
             continue
@@ -114,12 +135,12 @@ def build_edit_mask(composite, threshold=250):
 # Worker function for multiprocessing
 # ---------------------------------------------------------------------------
 def process_board_chunk(args_tuple):
-    """Process a chunk of boards. Each worker gets its own ComponentBankV2."""
+    """Process a chunk of boards. Each worker gets its own ComponentBankV2_new."""
     board_chunk, config = args_tuple
     worker_id = current_process().name
 
-    # Each worker creates its own ComponentBankV2 (not picklable)
-    bank = ComponentBankV2(
+    # Each worker creates its own ComponentBankV2_new (not picklable)
+    bank = ComponentBankV2_new(
         anno_dir=config["anno_dir"],
         image_dir=config["image_dir"],
     )
@@ -135,12 +156,17 @@ def process_board_chunk(args_tuple):
     for board in board_chunk:
         board_name = board["name"]
         board_color = board["color"]
+        resolution_class = board["resolution_class"]
         all_annotations = board["annotations"]
 
         img_path = os.path.join(config["image_dir"], f"{board_name}.png")
         if not os.path.exists(img_path):
             continue
-        board_img = Image.open(img_path).convert("RGB")
+        board_img = Image.open(img_path)
+        if board_img.mode != "RGB":
+            bg = Image.new("RGB", board_img.size, (255, 255, 255))
+            bg.paste(board_img, mask=board_img.convert("RGBA").split()[3] if board_img.mode in ("RGBA", "PA", "P") else None)
+            board_img = bg
         img_w, img_h = board_img.size
 
         for crop_idx in range(config["crops_per_board"]):
@@ -179,7 +205,7 @@ def process_board_chunk(args_tuple):
                 ]
 
             composite = build_composite(
-                crop_annotations, bank, board_name, board_color,
+                crop_annotations, bank, board_name, board_color, resolution_class,
                 crop_size, crop_size, config["resize_jitter"]
             )
 
@@ -188,7 +214,7 @@ def process_board_chunk(args_tuple):
                 composite = composite.resize((target_size, target_size), Image.LANCZOS)
 
             edit_mask = build_edit_mask(composite)
-            prompt = make_prompt(board_color)
+            prompt = make_prompt(board_color, crop_annotations, crop_size)
 
             sample_id = f"{board_name}_{crop_idx:03d}"
             real_patch.save(training_dir / f"{sample_id}.png")
@@ -209,7 +235,7 @@ def parse_args():
     parser.add_argument("--image_dir",
         default="/projects/_ssd/xrssd/data/ti_pcb/layout_data/v2_Color_Res_Class_xywh/image/train")
     parser.add_argument("--output_dir",
-        default="/projects/_ssd/xrssd/data/ti_pcb/layout_data/v2_Color_Res_Class_xywh/PCB_harmonize")
+        default="/projects/_ssd/xrssd/data/ti_pcb/layout_data/v2_Color_Res_Class_xywh/PCB_harmonize_v2")
     parser.add_argument("--crop_size", type=int, default=512)
     parser.add_argument("--target_size", type=int, default=1024)
     parser.add_argument("--crops_per_board", type=int, default=10)
@@ -258,6 +284,7 @@ def main():
         boards.append({
             "name": board_name,
             "color": data.get("board_color", "green"),
+            "resolution_class": data.get("resolution_class", "R3"),
             "annotations": annotations,
         })
 

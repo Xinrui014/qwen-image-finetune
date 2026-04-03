@@ -1,0 +1,94 @@
+model:
+  pretrained_model_name_or_path: Qwen/Qwen-Image-Edit-2511
+  quantize: false
+  lora:
+    r: 32
+    lora_alpha: 32
+    init_lora_weights: gaussian
+    target_modules: [to_k, to_q, to_v, to_out.0]
+    pretrained_weight: null
+    adapter_name: lora_pcb
+
+data:
+  class_path: qflux.data.dataset.ImageDataset
+  init_args:
+    dataset_path:
+      - /projects/_ssd/xrssd/data/ti_pcb/layout_data/v2_Color_Res_Class_xywh/PCB_harmonize_v2
+    caption_dropout_rate: 0.0
+    prompt_image_dropout_rate: 0.0
+    use_edit_mask: true
+    processor:
+      class_path: qflux.data.preprocess.ImageProcessor
+      init_args:
+        process_type: center_crop
+        resize_mode: bilinear
+        target_size: [1024, 1024]
+        controls_size: [[1024, 1024]]
+
+  batch_size: 4
+  num_workers: 4
+  shuffle: true
+
+logging:
+  output_dir: /projects/_ssd/xrssd/qwen-image-finetune/runs
+  report_to: wandb
+  tracker_project_name: pcb_harmonize_qwen_edit_v2_layoutPrompt
+  tags:
+    - PCB
+    - QwenImageEditPlus
+    - harmonization
+    - "1024"
+  notes: "PCB harmonization v2 with layout prompts, ComponentBankV2_new, r=32, 1024x1024"
+
+validation:
+  enabled: false
+
+optimizer:
+  class_path: prodigyopt.Prodigy
+  init_args:
+    lr: 1.0
+    use_bias_correction: true
+    safeguard_warmup: true
+    weight_decay: 0.01
+
+lr_scheduler:
+  scheduler_type: cosine
+  warmup_steps: 100
+  num_cycles: 0.5
+  power: 1.0
+
+loss:
+  mask_loss: true
+  forground_weight: 2.0
+  background_weight: 1.0
+
+train:
+  gradient_accumulation_steps: 1
+  max_train_steps: 5000
+  checkpointing_steps: 1000
+  max_grad_norm: 1.0
+  mixed_precision: bf16
+  gradient_checkpointing: true
+  low_memory: true
+  fit_device:
+    vae: cuda:0
+    text_encoder: cuda:0
+
+trainer: QwenImageEditPlus
+resume: null
+
+cache:
+  devices:
+    vae: cuda:0
+    text_encoder: cuda:0
+  cache_dir: /projects/_ssd/xrssd/qwen-image-finetune/runs/pcb_harmonize_qwen_edit_v2_layoutPrompt/cache
+  use_cache: true
+  prompt_empty_drop_keys:
+    - prompt_embeds
+    - pooled_prompt_embeds
+
+predict:
+  devices:
+    vae: cuda:0
+    text_encoder: cuda:0
+    dit: cuda:0
